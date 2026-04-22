@@ -817,6 +817,7 @@ class AIAgent:
         self.verbose_logging = verbose_logging
         self.quiet_mode = quiet_mode
         self.ephemeral_system_prompt = ephemeral_system_prompt
+        self._prompt_optimizer_extra_headers: dict[str, str] = {}
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
         self._user_id = user_id  # Platform user identifier (gateway sessions)
         self._gateway_session_key = gateway_session_key  # Stable per-chat key (e.g. agent:main:telegram:dm:123)
@@ -4091,9 +4092,26 @@ class AIAgent:
         if platform_key in PLATFORM_HINTS:
             prompt_parts.append(PLATFORM_HINTS[platform_key])
 
-        from agent.prompt_optimizer import get as _get_prompt_optimizer
-        _optimized = _get_prompt_optimizer().optimize(prompt_parts)
-        return "\n\n".join(p.strip() for p in _optimized if p.strip())
+        from agent.prompt_optimizer import get as _get_prompt_optimizer, _coerce as _coerce_opt
+        _result = _coerce_opt(_get_prompt_optimizer().optimize(prompt_parts))
+        self._prompt_optimizer_extra_headers = dict(_result.extra_headers)
+        return "\n\n".join(p.strip() for p in _result.parts if p.strip())
+
+    def _merge_optimizer_headers(self, kwargs: dict) -> dict:
+        """Merge self._prompt_optimizer_extra_headers into kwargs['extra_headers'].
+
+        Caller-supplied headers win on conflict. Returns the same kwargs dict
+        (mutated) for ergonomic chaining.
+        """
+        opt_headers = getattr(self, "_prompt_optimizer_extra_headers", {}) or {}
+        if not opt_headers:
+            return kwargs
+        existing = kwargs.get("extra_headers") or {}
+        # Start from optimizer-emitted headers, then overlay caller's to let
+        # explicit headers win. Don't mutate the caller's dict in place.
+        merged = {**opt_headers, **existing}
+        kwargs["extra_headers"] = merged
+        return kwargs
 
     # =========================================================================
     # Pre/post-call guardrails (inspired by PR #1321 — @alireza78a)
@@ -5177,6 +5195,7 @@ class AIAgent:
                     result["response"] = normalize_converse_response(raw_response)
                 else:
                     request_client_holder["client"] = self._create_request_openai_client(reason="chat_completion_request")
+                    self._merge_optimizer_headers(api_kwargs)
                     result["response"] = request_client_holder["client"].chat.completions.create(**api_kwargs)
             except Exception as e:
                 result["error"] = e
@@ -5528,6 +5547,7 @@ class AIAgent:
             # attempt's start, not a previous attempt's last chunk.
             last_chunk_time["t"] = time.time()
             self._touch_activity("waiting for provider response (streaming)")
+            self._merge_optimizer_headers(stream_kwargs)
             stream = request_client_holder["client"].chat.completions.create(**stream_kwargs)
 
             # Capture rate limit headers from the initial HTTP response.
@@ -7364,8 +7384,10 @@ class AIAgent:
                 if _flush_temperature is not None:
                     api_kwargs["temperature"] = _flush_temperature
                 from agent.auxiliary_client import _get_task_timeout
+                _flush_kw = {**api_kwargs, "timeout": _get_task_timeout("flush_memories")}
+                self._merge_optimizer_headers(_flush_kw)
                 response = self._ensure_primary_openai_client(reason="flush_memories").chat.completions.create(
-                    **api_kwargs, timeout=_get_task_timeout("flush_memories")
+                    **_flush_kw
                 )
 
             # Extract tool calls from the response, handling all API formats
@@ -8449,6 +8471,7 @@ class AIAgent:
                     _msg, _ = _nar(summary_response, strip_tool_prefix=self._is_anthropic_oauth)
                     final_response = (_msg.content or "").strip()
                 else:
+                    self._merge_optimizer_headers(summary_kwargs)
                     summary_response = self._ensure_primary_openai_client(reason="iteration_limit_summary").chat.completions.create(**summary_kwargs)
 
                     if summary_response.choices and summary_response.choices[0].message.content:
@@ -8492,6 +8515,7 @@ class AIAgent:
                     if summary_extra_body:
                         summary_kwargs["extra_body"] = summary_extra_body
 
+                    self._merge_optimizer_headers(summary_kwargs)
                     summary_response = self._ensure_primary_openai_client(reason="iteration_limit_summary_retry").chat.completions.create(**summary_kwargs)
 
                     if summary_response.choices and summary_response.choices[0].message.content:

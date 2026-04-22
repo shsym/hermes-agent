@@ -1,14 +1,15 @@
 """PromptOptimizer hook: register/get/reset lifecycle + default behavior."""
 from agent.prompt_optimizer import (
-    IdentityOptimizer, PromptOptimizer, get, register, reset_default,
+    IdentityOptimizer, PromptOptimization, PromptOptimizer,
+    _coerce, get, register, reset_default,
 )
 
 
 def test_default_optimizer_is_identity():
     reset_default()
     parts = ["alpha", "beta", "gamma"]
-    out = get().optimize(parts)
-    assert out == parts
+    out = _coerce(get().optimize(parts))
+    assert out.parts == parts
 
 
 def test_register_installs_custom_optimizer():
@@ -22,11 +23,11 @@ def test_register_installs_custom_optimizer():
     reset_default()
     register(Recorder())
     try:
-        out = get().optimize(["x", "y"])
+        out = _coerce(get().optimize(["x", "y"]))
     finally:
         reset_default()
     assert calls == [["x", "y"]]
-    assert out == ["x", "y"]
+    assert out.parts == ["x", "y"]
 
 
 def test_reset_restores_identity():
@@ -35,9 +36,9 @@ def test_reset_restores_identity():
             return []
 
     register(Dropper())
-    assert get().optimize(["x"]) == []
+    assert _coerce(get().optimize(["x"])).parts == []
     reset_default()
-    assert get().optimize(["x"]) == ["x"]
+    assert _coerce(get().optimize(["x"])).parts == ["x"]
 
 
 def test_optimizer_can_drop_parts():
@@ -49,7 +50,31 @@ def test_optimizer_can_drop_parts():
     reset_default()
     register(DropSecond())
     try:
-        out = get().optimize(["a", "b", "c"])
+        out = _coerce(get().optimize(["a", "b", "c"]))
     finally:
         reset_default()
-    assert out == ["a", "c"]
+    assert out.parts == ["a", "c"]
+
+
+def test_default_optimizer_returns_empty_headers():
+    """IdentityOptimizer returns parts unchanged AND no headers."""
+    reset_default()
+    result = get().optimize(["a", "b"])
+    assert result.parts == ["a", "b"]
+    assert result.extra_headers == {}
+
+
+def test_optimizer_can_emit_extra_headers():
+    from agent.prompt_optimizer import PromptOptimization
+
+    class WithHeaders:
+        def optimize(self, parts):
+            return PromptOptimization(parts=parts, extra_headers={"X-Foo": "bar"})
+
+    reset_default()
+    register(WithHeaders())
+    try:
+        result = get().optimize(["x"])
+    finally:
+        reset_default()
+    assert result.extra_headers == {"X-Foo": "bar"}
