@@ -8396,7 +8396,15 @@ class AIAgent:
 
             effective_system = self._cached_system_prompt or ""
             if self.ephemeral_system_prompt:
-                effective_system = (effective_system + "\n\n" + self.ephemeral_system_prompt).strip()
+                from agent.prompt_optimizer import get_ephemeral_router
+                _reduced, _eph_headers = get_ephemeral_router().route(self.ephemeral_system_prompt)
+                if _reduced:
+                    effective_system = (effective_system + "\n\n" + _reduced).strip()
+                if _eph_headers:
+                    _existing = getattr(self, "_prompt_optimizer_extra_headers", {}) or {}
+                    _merged = dict(_existing)
+                    _merged.update(_eph_headers)
+                    self._prompt_optimizer_extra_headers = _merged
             if effective_system:
                 api_messages = [{"role": "system", "content": effective_system}] + api_messages
             if self.prefill_messages:
@@ -9074,7 +9082,15 @@ class AIAgent:
             # prompt, so the stable cache prefix remains unchanged.
             effective_system = active_system_prompt or ""
             if self.ephemeral_system_prompt:
-                effective_system = (effective_system + "\n\n" + self.ephemeral_system_prompt).strip()
+                from agent.prompt_optimizer import get_ephemeral_router
+                _reduced, _eph_headers = get_ephemeral_router().route(self.ephemeral_system_prompt)
+                if _reduced:
+                    effective_system = (effective_system + "\n\n" + _reduced).strip()
+                if _eph_headers:
+                    _existing = getattr(self, "_prompt_optimizer_extra_headers", {}) or {}
+                    _merged = dict(_existing)
+                    _merged.update(_eph_headers)
+                    self._prompt_optimizer_extra_headers = _merged
             # NOTE: Plugin context from pre_llm_call hooks is injected into the
             # user message (see injection block above), NOT the system prompt.
             # This is intentional — system prompt modifications break the prompt

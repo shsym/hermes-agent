@@ -64,3 +64,36 @@ def _coerce(result) -> PromptOptimization:
         f"PromptOptimizer.optimize must return list[str] or PromptOptimization, "
         f"got {type(result).__name__}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral-text router (Phase-1 Idea G)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class EphemeralRouter(Protocol):
+    def route(self, ephemeral_text: str) -> tuple["str | None", dict[str, str]]: ...
+
+
+class IdentityEphemeralRouter:
+    """Default no-op: ephemeral text flows through to the system prompt
+    as before; no extra_headers emitted."""
+    def route(self, ephemeral_text: str) -> tuple["str | None", dict[str, str]]:
+        return (ephemeral_text, {})
+
+
+_ephemeral_registered: EphemeralRouter = IdentityEphemeralRouter()
+
+
+def register_ephemeral_router(r: EphemeralRouter) -> None:
+    global _ephemeral_registered
+    _ephemeral_registered = r
+
+
+def reset_ephemeral_router() -> None:
+    global _ephemeral_registered
+    _ephemeral_registered = IdentityEphemeralRouter()
+
+
+def get_ephemeral_router() -> EphemeralRouter:
+    return _ephemeral_registered

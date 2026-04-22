@@ -78,3 +78,36 @@ def test_optimizer_can_emit_extra_headers():
     finally:
         reset_default()
     assert result.extra_headers == {"X-Foo": "bar"}
+
+
+def test_default_ephemeral_router_is_identity():
+    from agent.prompt_optimizer import (
+        get_ephemeral_router, reset_ephemeral_router, IdentityEphemeralRouter,
+    )
+    reset_ephemeral_router()
+    assert isinstance(get_ephemeral_router(), IdentityEphemeralRouter)
+    reduced, headers = get_ephemeral_router().route("hello")
+    assert reduced == "hello"
+    assert headers == {}
+
+
+def test_register_ephemeral_router_installs_custom():
+    from agent.prompt_optimizer import (
+        register_ephemeral_router, get_ephemeral_router, reset_ephemeral_router,
+    )
+
+    class DropAndHeader:
+        def route(self, text):
+            return (None, {"X-Eph": "hi"})
+
+    reset_ephemeral_router()
+    register_ephemeral_router(DropAndHeader())
+    try:
+        r, h = get_ephemeral_router().route("ignored")
+        assert r is None
+        assert h == {"X-Eph": "hi"}
+    finally:
+        reset_ephemeral_router()
+    # Reset restored identity behavior.
+    r2, h2 = get_ephemeral_router().route("x")
+    assert r2 == "x" and h2 == {}
