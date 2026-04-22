@@ -1283,6 +1283,15 @@ class AIAgent:
                 print(f"🔄 Fallback chain ({len(self._fallback_chain)} providers): " +
                       " → ".join(f"{f['model']} ({f['provider']})" for f in self._fallback_chain))
 
+        # Phase 2.1 (Idea D): when HERMES_CONTEXT_INDEX=1 is set, enable
+        # the context_files toolset so the read_context tool is exposed
+        # alongside the compact context-files index emitted in the system
+        # prompt. Opt-in only — default off keeps every other consumer of
+        # run_agent.py on the legacy verbatim-AGENTS.md path.
+        if os.environ.get("HERMES_CONTEXT_INDEX", "0") == "1":
+            if enabled_toolsets is not None and "context_files" not in enabled_toolsets:
+                enabled_toolsets = list(enabled_toolsets) + ["context_files"]
+
         # Get available tools with filtering
         self.tools = get_tool_definitions(
             enabled_toolsets=enabled_toolsets,
@@ -4054,8 +4063,30 @@ class AIAgent:
             # dir, so os.getcwd() would pick up the repo's AGENTS.md and
             # other dev files — inflating token usage by ~10k for no benefit.
             _context_cwd = os.getenv("TERMINAL_CWD") or None
+
+            # Phase 2.1 (Idea D): when HERMES_CONTEXT_INDEX=1, replace
+            # verbatim context-file content in the system prompt with a
+            # compact index. The read_context tool surfaces full bodies
+            # on demand from an in-process cache populated here. Opt-in
+            # because this changes the system-prompt shape; non-opted
+            # consumers stay on the legacy verbatim path.
+            _context_index_sections = None
+            if os.environ.get("HERMES_CONTEXT_INDEX", "0") == "1":
+                try:
+                    from agent.context_section_registry import register_context_files
+                    _context_index_sections = register_context_files(
+                        cwd=(_context_cwd or os.getcwd()),
+                    )
+                except Exception as e:
+                    # Defensive: registrar failure must not block agent boot.
+                    logger.debug("context_section_registry failed (Phase 2.1): %s", e)
+                    _context_index_sections = None
+
             context_files_prompt = build_context_files_prompt(
-                cwd=_context_cwd, skip_soul=_soul_loaded)
+                cwd=_context_cwd,
+                skip_soul=_soul_loaded,
+                sections=_context_index_sections,
+            )
             if context_files_prompt:
                 prompt_parts.append(context_files_prompt)
 

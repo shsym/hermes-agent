@@ -1010,7 +1010,11 @@ def _load_cursorrules(cwd_path: Path) -> str:
     return _truncate_content(cursorrules_content, ".cursorrules")
 
 
-def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = False) -> str:
+def build_context_files_prompt(
+    cwd: Optional[str] = None,
+    skip_soul: bool = False,
+    sections: Optional[list] = None,
+) -> str:
     """Discover and load context files for the system prompt.
 
     Priority (first found wins — only ONE project context type is loaded):
@@ -1024,29 +1028,59 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
 
     When *skip_soul* is True, SOUL.md is not included here (it was already
     loaded via ``load_soul_md()`` for the identity slot).
+
+    When *sections* is a non-empty list of ``ContextSection`` records
+    (Phase 2.1, Idea D), the verbatim AGENTS.md / .cursorrules /
+    CLAUDE.md project-context body is REPLACED by a compact index
+    rendered via ``render_context_files_index``. The model can then
+    request individual section bodies on demand via the ``read_context``
+    tool. SOUL.md still loads from HERMES_HOME (it sits outside the
+    cwd-scanned context-files namespace).
+
+    When *sections* is None (default) or an empty list, behavior is
+    byte-identical to the pre-Idea-D path so non-opted-in callers see
+    no system-prompt regression.
     """
     if cwd is None:
         cwd = os.getcwd()
 
+    use_index = bool(sections)
+
     cwd_path = Path(cwd).resolve()
-    sections = []
+    parts: list[str] = []
 
-    # Priority-based project context: first match wins
-    project_context = (
-        _load_hermes_md(cwd_path)
-        or _load_agents_md(cwd_path)
-        or _load_claude_md(cwd_path)
-        or _load_cursorrules(cwd_path)
-    )
-    if project_context:
-        sections.append(project_context)
+    if use_index:
+        # Phase 2.1 (Idea D) — emit only the index for cwd-discovered
+        # context files. The full bodies are surfaced via read_context.
+        # Local import to avoid a hard dependency cycle on the registry
+        # module from any caller that doesn't opt in.
+        from agent.context_section_registry import render_context_files_index
+        index_text = render_context_files_index(sections)
+        if index_text:
+            parts.append(index_text)
+    else:
+        # Legacy path: priority-based project context, first match wins.
+        project_context = (
+            _load_hermes_md(cwd_path)
+            or _load_agents_md(cwd_path)
+            or _load_claude_md(cwd_path)
+            or _load_cursorrules(cwd_path)
+        )
+        if project_context:
+            parts.append(project_context)
 
-    # SOUL.md from HERMES_HOME only — skip when already loaded as identity
+    # SOUL.md from HERMES_HOME only — skip when already loaded as identity.
+    # SOUL.md is not part of the cwd-scanned context-files namespace, so it
+    # rides through unchanged on both the legacy and index paths.
     if not skip_soul:
         soul_content = load_soul_md()
         if soul_content:
-            sections.append(soul_content)
+            parts.append(soul_content)
 
-    if not sections:
+    if not parts:
         return ""
-    return "# Project Context\n\nThe following project context files have been loaded and should be followed:\n\n" + "\n".join(sections)
+    if use_index:
+        # Index path: no "# Project Context" wrapper — the index already
+        # carries its own heading and is intentionally compact.
+        return "\n\n".join(parts)
+    return "# Project Context\n\nThe following project context files have been loaded and should be followed:\n\n" + "\n".join(parts)

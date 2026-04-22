@@ -167,6 +167,12 @@ TOOLSETS = {
         "tools": ["memory"],
         "includes": []
     },
+
+    "context_files": {
+        "description": "On-demand loader for project context-file sections (AGENTS.md, .cursorrules, CLAUDE.md). Enabled with HERMES_CONTEXT_INDEX=1 (Phase 2.1, Idea D).",
+        "tools": ["read_context"],
+        "includes": []
+    },
     
     "session_search": {
         "description": "Search and recall past conversations with summarization",
