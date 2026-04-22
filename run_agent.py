@@ -4091,7 +4091,9 @@ class AIAgent:
         if platform_key in PLATFORM_HINTS:
             prompt_parts.append(PLATFORM_HINTS[platform_key])
 
-        return "\n\n".join(p.strip() for p in prompt_parts if p.strip())
+        from agent.prompt_optimizer import get as _get_prompt_optimizer
+        _optimized = _get_prompt_optimizer().optimize(prompt_parts)
+        return "\n\n".join(p.strip() for p in _optimized if p.strip())
 
     # =========================================================================
     # Pre/post-call guardrails (inspired by PR #1321 — @alireza78a)
